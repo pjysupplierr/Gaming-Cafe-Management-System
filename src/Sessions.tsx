@@ -82,7 +82,7 @@ export function Sessions() {
                     {expired && <Badge tone="red">time up · auto-locked</Badge>}
                   </div>
                   <p className="mt-0.5 text-xs text-slate-400">
-                    {member.name} · started {timeAgo(s.startedAt, now)} · {money(device.hourlyRate)}/h
+                    {member.name} · started {timeAgo(s.startedAt, now)} · {s.playerCount ? `${s.playerCount}P · ` : ""}{money(s.sessionHourlyRate ?? device.hourlyRate)}/h
                   </p>
                 </div>
 
@@ -179,6 +179,7 @@ export function Sessions() {
                       <p className="text-xs text-slate-400">
                         {fmtDuration(s.accumulatedMs)} played · ended {s.endedAt ? fmtTime(s.endedAt) : "—"} ·{" "}
                         {s.mode === "package" ? "package" : "pay-as-you-go"}
+                        {s.playerCount ? ` · ${s.playerCount}P` : ""}
                       </p>
                     </div>
                     <span className="font-mono text-sm font-bold text-slate-900 tabular dark:text-white">

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StoreProvider } from "./store";
 import type { View } from "./types";
 import { Sidebar, Topbar } from "./layout";
@@ -9,10 +9,24 @@ import { Users } from "./Users";
 import { Billing } from "./Billing";
 import { Reports } from "./Reports";
 import { Toasts } from "./ui";
+import { AIChatDrawer } from "./ai/AIChatDrawer";
 
 function Shell() {
   const [view, setView] = useState<View>("dashboard");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+
+  // Keyboard shortcut: Ctrl + / or Alt + A to toggle AI Monitor
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey && e.key === "/") || (e.altKey && (e.key === "a" || e.key === "A"))) {
+        e.preventDefault();
+        setAiOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className="min-h-screen">
@@ -27,7 +41,11 @@ function Shell() {
       />
 
       <div className="relative z-10 lg:pl-60">
-        <Topbar view={view} openMobile={() => setMobileOpen(true)} />
+        <Topbar
+          view={view}
+          openMobile={() => setMobileOpen(true)}
+          openAiMonitor={() => setAiOpen(true)}
+        />
         <main className="px-4 py-6 sm:px-6">
           <div key={view} className="view-in mx-auto max-w-[1440px]">
             {view === "dashboard" && <Dashboard setView={setView} />}
@@ -39,6 +57,12 @@ function Shell() {
           </div>
         </main>
       </div>
+
+      <AIChatDrawer
+        isOpen={aiOpen}
+        onOpen={() => setAiOpen(true)}
+        onClose={() => setAiOpen(false)}
+      />
 
       <Toasts />
     </div>

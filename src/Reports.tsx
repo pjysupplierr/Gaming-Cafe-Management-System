@@ -114,7 +114,7 @@ export function Reports() {
           { k: "Gross revenue", v: money(total) },
           { k: "Sessions billed", v: String(sessionCount) },
           { k: "Avg. ticket", v: money(avgTicket) },
-          { k: "Top method", v: byMethod.reduce((a, b) => (b.v > a.v ? b : a)).m.toUpperCase() },
+          { k: "Top method", v: txs.length === 0 ? "—" : byMethod.reduce((a, b) => (b.v > a.v ? b : a)).m.toUpperCase() },
         ].map((x) => (
           <div key={x.k} className={`${cardCls} p-4`}>
             <p className="text-[11px] font-semibold tracking-[0.1em] text-slate-400 uppercase">{x.k}</p>

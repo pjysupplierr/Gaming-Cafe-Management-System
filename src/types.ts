@@ -9,6 +9,7 @@ export interface Device {
   hourlyRate: number;
   specs: string;
   status: DeviceStatus;
+  playerCount?: number;
 }
 
 export type Tier = "regular" | "premium" | "vip";
@@ -35,6 +36,8 @@ export interface Session {
   pkgId?: string;
   prepaidSec: number;
   pkgPrice: number;
+  playerCount?: number;
+  sessionHourlyRate?: number;
   /** ms accumulated across paused segments */
   accumulatedMs: number;
   /** epoch ms when the current running segment started */
@@ -45,6 +48,29 @@ export interface Session {
   charged?: number;
   method?: PayMethod;
 }
+
+export interface Reservation {
+  id: string;
+  deviceId: string;
+  memberId?: string;
+  customerName: string;
+  customerPhone?: string;
+  deviceType: DeviceType;
+  startTime: number;
+  durationHours: number;
+  playerCount?: number;
+  notes?: string;
+  estimatedAmount: number;
+  status: "confirmed" | "completed" | "cancelled";
+  createdAt: number;
+}
+
+export const CONSOLE_PLAYER_RATES: Record<number, number> = {
+  1: 80,
+  2: 140,
+  3: 180,
+  4: 200,
+};
 
 export type PayMethod = "cash" | "card" | "wallet";
 export type TxKind = "session" | "package" | "topup";
@@ -72,8 +98,10 @@ export interface PackageDef {
 
 export const PACKAGES: PackageDef[] = [
   { id: "p1", label: "1 Hour", hours: 1, disc: 0 },
-  { id: "p2", label: "2 Hours", hours: 2, disc: 0.1, tag: "-10%" },
-  { id: "p5", label: "5 Hours", hours: 5, disc: 0.2, tag: "-20%" },
+  { id: "p2", label: "2 Hours", hours: 2, disc: 0.1, tag: "₹50/h" },
+  { id: "p3", label: "3 Hours", hours: 3, disc: 0.15, tag: "₹50/h" },
+  { id: "p4", label: "4 Hours", hours: 4, disc: 0.2, tag: "₹50/h" },
+  { id: "p5", label: "5 Hours", hours: 5, disc: 0.25, tag: "₹50/h" },
   { id: "pd", label: "Day Pass", hours: 12, disc: 0.4, tag: "Best value" },
 ];
 

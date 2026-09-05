@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
   Bell,
+  Bot,
   LayoutDashboard,
   Menu,
   Monitor,
   Moon,
   Receipt,
   RotateCcw,
+  Sparkles,
   Sun,
   Timer,
   Users,
@@ -16,18 +18,29 @@ import {
 import { useStore } from "./store";
 import type { View } from "./types";
 import { fmtTime, money } from "./utils";
+import logoImg from "./assets/logo.jpg";
 
-export function Logo({ compact }: { compact?: boolean }) {
+export { logoImg };
+
+export function Logo({
+  compact,
+  className = "",
+}: {
+  compact?: boolean;
+  className?: string;
+}) {
   return (
-    <div className="flex items-center gap-2.5">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-600 shadow-lg shadow-brand-600/40">
-        <svg viewBox="0 0 32 32" className="h-5 w-5">
-          <path d="M17.5 4 7.5 18h6.2l-1.7 10 10.5-14.5h-6.3L17.5 4z" fill="white" />
-        </svg>
+    <div className={`flex items-center gap-3 ${className}`}>
+      <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full ring-2 ring-brand-500/40 shadow-lg shadow-brand-600/30 bg-ink-950 transition-transform duration-200 hover:scale-105">
+        <img
+          src={logoImg}
+          alt="GameNation Logo"
+          className="h-full w-full object-cover"
+        />
       </div>
       {!compact && (
         <div className="leading-none">
-          <p className="font-display text-[17px] font-bold tracking-tight text-white">BlueShift</p>
+          <p className="font-display text-[17px] font-bold tracking-tight text-white">GameNation</p>
           <p className="mt-1 text-[10px] font-semibold tracking-[0.22em] text-brand-300/80 uppercase">
             Ops Console
           </p>
@@ -57,7 +70,7 @@ export function Sidebar({
   mobileOpen: boolean;
   closeMobile: () => void;
 }) {
-  const { state, now, resetDemo, alerts } = useStore();
+  const { state, now, clearData, alerts } = useStore();
   const inUse = state.devices.filter((d) => d.status === "in_use").length;
   const online = state.devices.filter((d) => d.status !== "offline").length;
   const occ = online === 0 ? 0 : Math.round((inUse / online) * 100);
@@ -153,11 +166,11 @@ export function Sidebar({
         <div className="flex items-center justify-between border-t border-white/8 px-5 py-3.5">
           <span className="font-mono text-[10px] text-slate-600">v2.4.1 · {fmtTime(now)}</span>
           <button
-            onClick={resetDemo}
+            onClick={clearData}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-slate-500 transition hover:bg-white/5 hover:text-slate-300"
-            title="Restore fresh demo data"
+            title="Clear all stored data"
           >
-            <RotateCcw className="h-3 w-3" /> Reset demo
+            <RotateCcw className="h-3 w-3" /> Clear data
           </button>
         </div>
       </aside>
@@ -168,9 +181,11 @@ export function Sidebar({
 export function Topbar({
   view,
   openMobile,
+  openAiMonitor,
 }: {
   view: View;
   openMobile: () => void;
+  openAiMonitor?: () => void;
 }) {
   const { state, now, alerts, theme, toggleTheme, role, setRole, toast, isAdmin } = useStore();
   const [bellOpen, setBellOpen] = useState(false);
@@ -215,6 +230,14 @@ export function Topbar({
           <Menu className="h-4.5 w-4.5" />
         </button>
 
+        <div className="flex items-center lg:hidden">
+          <img
+            src={logoImg}
+            alt="GameNation"
+            className="h-8 w-8 rounded-full object-cover ring-2 ring-brand-500/30"
+          />
+        </div>
+
         <div className="min-w-0">
           <h1 className="font-display text-lg leading-tight font-bold tracking-tight text-slate-900 sm:text-xl dark:text-white">
             {titles[view].title}
@@ -225,6 +248,18 @@ export function Topbar({
         </div>
 
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
+          {/* AI Floor Monitor trigger */}
+          {openAiMonitor && (
+            <button
+              onClick={openAiMonitor}
+              className="flex items-center gap-1.5 rounded-lg border border-brand-500/30 bg-brand-500/10 px-2.5 py-1.5 text-xs font-semibold text-brand-600 transition hover:bg-brand-500/20 active:scale-95 dark:text-brand-300"
+              title="Open AI Floor Monitor"
+            >
+              <Bot className="h-4 w-4 text-brand-500 animate-pulse" />
+              <span className="hidden sm:inline">Floor AI</span>
+            </button>
+          )}
+
           <div className="hidden items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 md:flex dark:border-ink-600 dark:bg-ink-800">
             <span className="relative flex h-2 w-2">
               <span className="ping-soft absolute inline-flex h-full w-full rounded-full bg-emerald-400" />
@@ -333,7 +368,7 @@ export function Topbar({
             </div>
             <div className="hidden leading-tight xl:block">
               <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                {isAdmin ? "Nadia Reyes" : "Omar Petit"}
+                {isAdmin ? "Administrator" : "Staff"}
               </p>
               <p className="text-[11px] text-slate-400 capitalize">{role} · Front desk</p>
             </div>

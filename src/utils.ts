@@ -1,4 +1,4 @@
-import { PACKAGES, TIER_META, type PayMethod, type Session, type Tier } from "./types";
+import { CONSOLE_PLAYER_RATES, PACKAGES, TIER_META, type PayMethod, type Session, type Tier } from "./types";
 
 let counter = 0;
 export function uid(prefix = "id"): string {
@@ -10,14 +10,20 @@ export function uid(prefix = "id"): string {
 
 export const round2 = (n: number) => Math.round(n * 100) / 100;
 
+export function getConsoleHourlyRate(playerCount = 1): number {
+  return CONSOLE_PLAYER_RATES[playerCount] ?? 80;
+}
+
 export function money(n: number): string {
   const sign = n < 0 ? "-" : "";
-  return `${sign}$${Math.abs(n).toFixed(2)}`;
+  const abs = Math.abs(n);
+  const formatted = abs % 1 === 0 ? abs.toFixed(0) : abs.toFixed(2);
+  return `${sign}₹${formatted}`;
 }
 
 export function moneyShort(n: number): string {
-  if (Math.abs(n) >= 1000) return `$${(n / 1000).toFixed(1)}k`;
-  return `$${n.toFixed(0)}`;
+  if (Math.abs(n) >= 1000) return `₹${(n / 1000).toFixed(1)}k`;
+  return `₹${n.toFixed(0)}`;
 }
 
 /** elapsed milliseconds of a session at a given clock time.
@@ -82,20 +88,94 @@ export function isToday(ts: number, now: number): boolean {
 /* ---------------- billing ---------------- */
 
 export function tierDiscount(tier: Tier): number {
-  return TIER_META[tier].disc;
+  return TIER_META[tier]?.disc ?? 0;
 }
 
-/** prepaid price of a package on a device with a given hourly rate */
-export function packagePrice(rate: number, pkgId: string, tier: Tier): number {
-  const pkg = PACKAGES.find((p) => p.id === pkgId)!;
-  return round2(rate * pkg.hours * (1 - pkg.disc) * (1 - tierDiscount(tier)));
+/**
+ * Calculates price based on device type and hours.
+ * For PC:
+ *  - 1 hour = ₹60
+ *  - > 1 hour = ₹50/hr (e.g. 2 hrs = ₹100, 3 hrs = ₹150, 4 hrs = ₹200, 5 hrs = ₹250)
+ * For other devices:
+ *  - Standard rate with volume discount
+ */
+export function calcSessionPrice(
+  deviceOrRate:
+    | { hourlyRate: number; type?: string; playerCount?: number; sessionHourlyRate?: number }
+    | number,
+  hours: number,
+  tier: Tier = "regular",
+  deviceType?: string
+): number {
+  const isObj = typeof deviceOrRate === "object" && deviceOrRate !== null;
+  const dType = isObj ? deviceOrRate.type : deviceType;
+  let rate: number;
+  if (isObj) {
+    if (deviceOrRate.sessionHourlyRate) {
+      rate = deviceOrRate.sessionHourlyRate;
+    } else if (dType === "console" && deviceOrRate.playerCount && CONSOLE_PLAYER_RATES[deviceOrRate.playerCount]) {
+      rate = CONSOLE_PLAYER_RATES[deviceOrRate.playerCount];
+    } else {
+      rate = deviceOrRate.hourlyRate;
+    }
+  } else {
+    rate = deviceOrRate;
+  }
+  const isPC = dType === "pc" || (!dType && rate === 60);
+
+  if (dType === "console") {
+    // Console has NO discounts (no volume discounts, no tier discounts): flat rate * hours
+    return round2(rate * hours);
+  }
+
+  let base: number;
+  if (isPC) {
+    if (hours <= 1) {
+      base = (rate || 60) * hours;
+    } else {
+      // If user books PC for more than 1 hr, the rate is ₹50/hr
+      base = 50 * hours;
+    }
+  } else {
+    let disc = 0;
+    if (hours >= 12) disc = 0.4;
+    else if (hours >= 5) disc = 0.25;
+    else if (hours >= 4) disc = 0.2;
+    else if (hours >= 3) disc = 0.15;
+    else if (hours >= 2) disc = 0.1;
+    base = rate * hours * (1 - disc);
+  }
+
+  return round2(base * (1 - tierDiscount(tier)));
+}
+
+/** prepaid price of a package on a device */
+export function packagePrice(
+  deviceOrRate:
+    | { hourlyRate: number; type?: string; playerCount?: number; sessionHourlyRate?: number }
+    | number,
+  pkgId: string,
+  tier: Tier = "regular",
+  deviceType?: string
+): number {
+  const pkg = PACKAGES.find((p) => p.id === pkgId);
+  if (!pkg) return 0;
+  return calcSessionPrice(deviceOrRate, pkg.hours, tier, deviceType);
 }
 
 /** pay-as-you-go charge, rounded up to 15-minute blocks */
-export function paygCharge(rate: number, ms: number, tier: Tier): number {
+export function paygCharge(
+  deviceOrRate:
+    | { hourlyRate: number; type?: string; playerCount?: number; sessionHourlyRate?: number }
+    | number,
+  ms: number,
+  tier: Tier = "regular",
+  deviceType?: string
+): number {
   const mins = Math.max(1, Math.ceil(ms / 60000));
   const blocks = Math.ceil(mins / 15);
-  return round2((blocks * 15 / 60) * rate * (1 - tierDiscount(tier)));
+  const hours = (blocks * 15) / 60;
+  return calcSessionPrice(deviceOrRate, hours, tier, deviceType);
 }
 
 export const METHOD_LABEL: Record<PayMethod, string> = {
@@ -121,17 +201,4 @@ export function downloadCSV(filename: string, rows: (string | number)[][]) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-}
-
-/* ---------------- deterministic rng (for seed data) ---------------- */
-
-export function mulberry32(seed: number) {
-  let a = seed;
-  return function () {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }

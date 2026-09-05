@@ -8,26 +8,36 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { seedDevices, seedMembers, seedSessions, seedTransactions } from "./data";
 import {
+  CONSOLE_PLAYER_RATES,
   PACKAGES,
   type Device,
   type DeviceStatus,
   type Member,
   type PayMethod,
+  type Reservation,
   type Role,
   type Session,
   type SessionMode,
   type Tier,
   type Tx,
 } from "./types";
-import { elapsedMs, packagePrice, paygCharge, round2, uid } from "./utils";
+import {
+  calcSessionPrice,
+  elapsedMs,
+  money,
+  packagePrice,
+  paygCharge,
+  round2,
+  uid,
+} from "./utils";
 
 export interface AppState {
   devices: Device[];
   members: Member[];
   sessions: Session[];
   transactions: Tx[];
+  reservations: Reservation[];
 }
 
 export interface Alert {
@@ -55,6 +65,8 @@ export interface SettleInfo {
   pkgLabel?: string;
   pkgPrice: number;
   txId?: string;
+  playerCount?: number;
+  sessionHourlyRate?: number;
 }
 
 interface StoreApi {
@@ -75,7 +87,9 @@ interface StoreApi {
     memberId: string;
     mode: SessionMode;
     pkgId?: string;
+    customHours?: number;
     method: PayMethod;
+    playerCount?: number;
   }) => Result;
   pauseSession: (id: string) => void;
   resumeSession: (id: string) => void;
@@ -93,37 +107,61 @@ interface StoreApi {
   deleteMember: (id: string) => Result;
   topUp: (memberId: string, amount: number, method: PayMethod) => void;
 
+  addReservation: (r: Omit<Reservation, "id" | "createdAt" | "status">) => Result;
+  cancelReservation: (id: string) => void;
+  deleteReservation: (id: string) => void;
+  startReservationSession: (reservationId: string, method?: PayMethod) => Result;
+
+  clearData: () => void;
   resetDemo: () => void;
 }
 
 const Ctx = createContext<StoreApi | null>(null);
 
-const LS_STATE = "blueshift:state:v3";
-const LS_THEME = "blueshift:theme";
-const LS_ROLE = "blueshift:role";
+const LS_STATE = "GameNation:state:v5";
+const LS_THEME = "GameNation:theme";
+const LS_ROLE = "GameNation:role";
 
 function freshState(): AppState {
-  const devices = seedDevices();
-  const members = seedMembers();
   return {
-    devices,
-    members,
-    sessions: seedSessions(),
-    transactions: seedTransactions(devices, members),
+    devices: [],
+    members: [],
+    sessions: [],
+    transactions: [],
+    reservations: [],
   };
 }
 
 function loadState(): AppState {
   try {
+    ["GameNation:state:v4", "GameNation:state:v3", "GameNation:state:v2", "GameNation:state"].forEach((k) => {
+      try {
+        localStorage.removeItem(k);
+      } catch {
+        /* ignore */
+      }
+    });
     const raw = localStorage.getItem(LS_STATE);
     if (raw) {
       const parsed = JSON.parse(raw) as AppState;
       if (parsed && Array.isArray(parsed.devices) && Array.isArray(parsed.members)) {
+        parsed.reservations = Array.isArray(parsed.reservations) ? parsed.reservations : [];
+        // Migrate any existing devices from old USD rates to INR
+        parsed.devices = parsed.devices.map((d) => {
+          if (d.type === "pc" && (d.hourlyRate < 20 || !d.hourlyRate)) {
+            return { ...d, hourlyRate: 60 };
+          }
+          if (d.hourlyRate < 20) {
+            const def = d.type === "console" ? 80 : d.type === "vr" ? 120 : d.type === "sim" ? 150 : 60;
+            return { ...d, hourlyRate: def };
+          }
+          return d;
+        });
         return parsed;
       }
     }
   } catch {
-    /* fall through to seed */
+    /* fall through to fresh state */
   }
   return freshState();
 }
@@ -191,7 +229,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /* ---------------- sessions ---------------- */
 
   const startSession: StoreApi["startSession"] = useCallback(
-    ({ deviceId, memberId, mode, pkgId, method }) => {
+    ({ deviceId, memberId, mode, pkgId, customHours, method, playerCount }) => {
       const st = stateRef.current;
       const device = st.devices.find((d) => d.id === deviceId);
       const member = st.members.find((m) => m.id === memberId);
@@ -199,13 +237,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (device.status !== "available") return { ok: false, reason: `${device.name} is not available.` };
 
       const t = Date.now();
+      const effPlayerCount = device.type === "console" ? (playerCount ?? device.playerCount ?? 1) : undefined;
+      const effRate =
+        device.type === "console" && effPlayerCount && CONSOLE_PLAYER_RATES[effPlayerCount]
+          ? CONSOLE_PLAYER_RATES[effPlayerCount]
+          : device.hourlyRate;
+      const effectiveDevice = {
+        ...device,
+        hourlyRate: effRate,
+        playerCount: effPlayerCount,
+        sessionHourlyRate: effRate,
+      };
+
       let pkgPriceVal = 0;
       let prepaidSec = 0;
+      let pkgLabel = "";
 
-      if (mode === "package" && pkgId) {
-        const pkg = PACKAGES.find((p) => p.id === pkgId)!;
-        pkgPriceVal = packagePrice(device.hourlyRate, pkgId, member.tier);
-        prepaidSec = pkg.hours * 3600;
+      if (mode === "package") {
+        if (customHours && customHours > 0) {
+          pkgPriceVal = calcSessionPrice(effectiveDevice, customHours, member.tier);
+          prepaidSec = customHours * 3600;
+          pkgLabel = `${customHours} Hour${customHours === 1 ? "" : "s"}`;
+        } else if (pkgId) {
+          const pkg = PACKAGES.find((p) => p.id === pkgId);
+          if (pkg) {
+            pkgPriceVal = packagePrice(effectiveDevice, pkgId, member.tier);
+            prepaidSec = pkg.hours * 3600;
+            pkgLabel = pkg.label;
+          }
+        }
+
         if (method === "wallet") {
           if (member.wallet < pkgPriceVal)
             return { ok: false, reason: "Insufficient wallet balance for this package." };
@@ -213,13 +274,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
 
       const txs: Tx[] = [];
-      if (mode === "package" && pkgId) {
+      if (mode === "package" && pkgPriceVal > 0) {
         txs.push({
           id: uid("t"),
           at: t,
           memberId: member.id,
           memberName: member.name,
-          label: `Package · ${PACKAGES.find((p) => p.id === pkgId)!.label}`,
+          label: `Package · ${pkgLabel}${effPlayerCount ? ` (${effPlayerCount}P)` : ""}`,
           detail: `${device.name} · ${pkgId === "pd" ? "Day pass" : "Prepaid time"}`,
           kind: "package",
           method,
@@ -234,9 +295,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         memberId,
         status: "active",
         mode,
-        pkgId: mode === "package" ? pkgId : undefined,
+        pkgId: mode === "package" ? (pkgId || (customHours ? `c_${customHours}h` : undefined)) : undefined,
         prepaidSec,
         pkgPrice: pkgPriceVal,
+        playerCount: effPlayerCount,
+        sessionHourlyRate: effRate,
         accumulatedMs: 0,
         resumedAt: t,
         pausedAt: null,
@@ -292,7 +355,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const member = st.members.find((m) => m.id === s.memberId);
     if (!device || !member) return { ok: false, reason: "Record not found." };
     const pkg = PACKAGES.find((p) => p.id === pkgId)!;
-    const price = packagePrice(device.hourlyRate, pkgId, member.tier);
+
+    const effRate = s.sessionHourlyRate ?? (s.playerCount ? (CONSOLE_PLAYER_RATES[s.playerCount] ?? device.hourlyRate) : device.hourlyRate);
+    const effDevice = { ...device, hourlyRate: effRate, sessionHourlyRate: effRate, playerCount: s.playerCount };
+
+    let price: number;
+    if (device.type === "pc" || effRate === 60) {
+      const currentHours = s.prepaidSec / 3600;
+      const targetHours = currentHours + pkg.hours;
+      const targetCost = calcSessionPrice(effDevice, targetHours, member.tier);
+      price = Math.max(0, round2(targetCost - s.pkgPrice));
+    } else {
+      price = packagePrice(effDevice, pkgId, member.tier);
+    }
+
     if (method === "wallet" && member.wallet < price)
       return { ok: false, reason: "Insufficient wallet balance." };
 
@@ -312,7 +388,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           at: t,
           memberId: member.id,
           memberName: member.name,
-          label: `Extension · ${pkg.label}`,
+          label: `Extension · ${pkg.label}${s.playerCount ? ` (${s.playerCount}P)` : ""}`,
           detail: device.name,
           kind: "package",
           method,
@@ -333,15 +409,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const member = st.members.find((m) => m.id === s.memberId);
     if (!device || !member) return { error: "Record not found." };
 
+    const effRate = s.sessionHourlyRate ?? (s.playerCount ? (CONSOLE_PLAYER_RATES[s.playerCount] ?? device.hourlyRate) : device.hourlyRate);
+    const effDevice = { ...device, hourlyRate: effRate, sessionHourlyRate: effRate, playerCount: s.playerCount };
+
     const t = Date.now();
     const total = elapsedMs(s, t);
     const overageMs = Math.max(0, total - s.prepaidSec * 1000);
-    const charged =
-      s.mode === "package"
-        ? overageMs > 0
-          ? paygCharge(device.hourlyRate, overageMs, member.tier)
-          : 0
-        : paygCharge(device.hourlyRate, total, member.tier);
+
+    let charged = 0;
+    if (s.mode === "package") {
+      if (overageMs > 0) {
+        if (device.type === "pc" || effRate === 60) {
+          const totalHours = Math.ceil(Math.max(1, total / 60000) / 15) * 15 / 60;
+          const fullCost = calcSessionPrice(effDevice, totalHours, member.tier);
+          charged = Math.max(0, round2(fullCost - s.pkgPrice));
+        } else {
+          charged = paygCharge(effDevice, overageMs, member.tier);
+        }
+      } else {
+        charged = 0;
+      }
+    } else {
+      charged = paygCharge(effDevice, total, member.tier);
+    }
 
     if (method === "wallet" && member.wallet < charged)
       return { error: "Insufficient wallet balance — choose another method or top up." };
@@ -359,7 +449,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         detail:
           s.mode === "package" && overageMs > 0
             ? `Overage · ${Math.ceil(overageMs / 60000)}m beyond prepaid time`
-            : `${Math.ceil(total / 60000)}m @ $${device.hourlyRate.toFixed(2)}/h`,
+            : `${Math.ceil(total / 60000)}m @ ${money(effRate)}/h${s.playerCount ? ` (${s.playerCount}P)` : ""}`,
         kind: "session",
         method,
         amount: charged,
@@ -372,7 +462,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       devices: prev.devices.map((d) => (d.id === device.id ? { ...d, status: "available" } : d)),
       members:
         method === "wallet" && charged > 0
-          ? prev.members.map((m) => (m.id === member.id ? { ...m, wallet: round2(m.wallet - charged) } : m))
+            ? prev.members.map((m) => (m.id === member.id ? { ...m, wallet: round2(m.wallet - charged) } : m))
           : prev.members,
       sessions: prev.sessions.map((x) =>
         x.id === id
@@ -386,12 +476,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       charged,
       elapsedMsTotal: total,
       overageMs,
-      device,
+      device: effDevice,
       member,
       method,
       pkgLabel: s.mode === "package" ? PACKAGES.find((p) => p.id === s.pkgId)?.label : undefined,
       pkgPrice: s.pkgPrice,
       txId,
+      playerCount: s.playerCount,
+      sessionHourlyRate: effRate,
     };
   }, []);
 
@@ -484,10 +576,120 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const resetDemo = useCallback(() => {
+  /* ---------------- reservations ---------------- */
+
+  const addReservation: StoreApi["addReservation"] = useCallback((r) => {
+    const st = stateRef.current;
+    const dev = st.devices.find((d) => d.id === r.deviceId);
+    if (!dev) return { ok: false, reason: "Selected station does not exist." };
+
+    const newRes: Reservation = {
+      ...r,
+      id: uid("res"),
+      status: "confirmed",
+      createdAt: Date.now(),
+    };
+
+    setState((prev) => ({
+      ...prev,
+      reservations: [newRes, ...prev.reservations],
+    }));
+    return { ok: true };
+  }, []);
+
+  const cancelReservation = useCallback((id: string) => {
+    setState((prev) => ({
+      ...prev,
+      reservations: prev.reservations.map((r) =>
+        r.id === id ? { ...r, status: "cancelled" } : r
+      ),
+    }));
+  }, []);
+
+  const deleteReservation = useCallback((id: string) => {
+    setState((prev) => ({
+      ...prev,
+      reservations: prev.reservations.filter((r) => r.id !== id),
+    }));
+  }, []);
+
+  const startReservationSession: StoreApi["startReservationSession"] = useCallback(
+    (reservationId, payMethod = "cash") => {
+      const st = stateRef.current;
+      const res = st.reservations.find((r) => r.id === reservationId);
+      if (!res) return { ok: false, reason: "Reservation not found." };
+      if (res.status === "completed") return { ok: false, reason: "Reservation has already been fulfilled." };
+
+      const dev = st.devices.find((d) => d.id === res.deviceId);
+      if (!dev) return { ok: false, reason: "Station no longer exists." };
+      if (dev.status !== "available") {
+        return {
+          ok: false,
+          reason: `${dev.name} is currently ${dev.status.replace("_", " ")}. Settle active session or wait for it to become available.`,
+        };
+      }
+
+      let targetMemberId = res.memberId;
+      if (!targetMemberId) {
+        const existing = st.members.find(
+          (m) =>
+            (res.customerPhone && m.phone === res.customerPhone) ||
+            m.name.toLowerCase() === res.customerName.toLowerCase()
+        );
+        if (existing) {
+          targetMemberId = existing.id;
+        } else {
+          const newMemberId = uid("m");
+          const newMember: Member = {
+            id: newMemberId,
+            name: res.customerName,
+            phone: res.customerPhone || "",
+            email: "",
+            tier: "regular",
+            wallet: 0,
+            joinedAt: Date.now(),
+          };
+          setState((prev) => ({ ...prev, members: [newMember, ...prev.members] }));
+          targetMemberId = newMemberId;
+        }
+      }
+
+      const startRes = startSession({
+        deviceId: res.deviceId,
+        memberId: targetMemberId,
+        mode: "package",
+        customHours: res.durationHours,
+        method: payMethod,
+        playerCount: res.playerCount,
+      });
+
+      if (!startRes.ok) return startRes;
+
+      setState((prev) => ({
+        ...prev,
+        reservations: prev.reservations.map((r) =>
+          r.id === reservationId ? { ...r, status: "completed" } : r
+        ),
+      }));
+
+      return { ok: true };
+    },
+    [startSession]
+  );
+
+  const clearData = useCallback(() => {
     setState(freshState());
-    toast("Demo data restored to a fresh state.", "info");
+    try {
+      ["GameNation:state:v5", "GameNation:state:v4", "GameNation:state:v3", "GameNation:state:v2", "GameNation:state"].forEach((k) => {
+        localStorage.removeItem(k);
+      });
+    } catch {
+      /* ignore */
+    }
+    toast("All data cleared to a clean state.", "info");
   }, [toast]);
+
+  const resetDemo = clearData;
 
   /* ---------------- derived alerts ---------------- */
 
@@ -554,6 +756,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     updateMember,
     deleteMember,
     topUp,
+    addReservation,
+    cancelReservation,
+    deleteReservation,
+    startReservationSession,
+    clearData,
     resetDemo,
   };
 

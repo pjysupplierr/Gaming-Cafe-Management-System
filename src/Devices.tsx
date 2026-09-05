@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { Download, Pencil, Plus, Search, Trash2, Upload, Wrench } from "lucide-react";
+import { Download, Pencil, Play, Plus, Search, Trash2, Upload, Wrench } from "lucide-react";
 import { useStore } from "./store";
 import { DEVICE_META, STATUS_META, type DeviceStatus, type DeviceType } from "./types";
 import { downloadCSV, money } from "./utils";
 import { btnGhost, btnPrimary, cardCls, DeviceIcon, EmptyState, StatusBadge, inputCls } from "./ui";
-import { ConfirmModal, DeviceFormModal, ImportDevicesModal } from "./modals";
+import { ConfirmModal, DeviceFormModal, ImportDevicesModal, StartSessionModal } from "./modals";
 
 export function Devices() {
   const { state, isAdmin, toast, setDeviceStatus, deleteDevice } = useStore();
@@ -16,6 +16,7 @@ export function Devices() {
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [startFor, setStartFor] = useState<string | null>(null);
 
   const filtered = useMemo(
     () =>
@@ -56,7 +57,7 @@ export function Devices() {
   };
 
   const exportCSV = () => {
-    downloadCSV("blueshift-devices.csv", [
+    downloadCSV("GameNation-devices.csv", [
       ["Name", "Type", "Zone", "Hourly rate", "Status", "Specs"],
       ...filtered.map((d) => [d.name, DEVICE_META[d.type].label, d.zone, d.hourlyRate, STATUS_META[d.status].label, d.specs]),
     ]);
@@ -178,7 +179,10 @@ export function Devices() {
                       </span>
                       <div>
                         <p className="font-semibold text-slate-800 dark:text-slate-100">{d.name}</p>
-                        <p className="text-[11px] text-slate-400">{DEVICE_META[d.type].label}</p>
+                        <p className="text-[11px] text-slate-400">
+                          {DEVICE_META[d.type].label}
+                          {d.type === "console" && d.playerCount ? ` · ${d.playerCount} Players` : ""}
+                        </p>
                       </div>
                     </div>
                   </td>
@@ -190,6 +194,16 @@ export function Devices() {
                   <td className="max-w-[220px] truncate px-2 py-3 text-xs text-slate-400">{d.specs || "—"}</td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+                      {d.status === "available" && (
+                        <button
+                          onClick={() => setStartFor(d.id)}
+                          className="rounded-md p-1.5 text-slate-400 transition hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-500/10"
+                          aria-label={`Start session on ${d.name}`}
+                          title="Start session"
+                        >
+                          <Play className="h-4 w-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => gate() && setEditing(d.id)}
                         className="rounded-md p-1.5 text-slate-400 transition hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10"
@@ -243,6 +257,7 @@ export function Devices() {
           onClose={() => setDeleting(null)}
         />
       )}
+      {startFor && <StartSessionModal deviceId={startFor} onClose={() => setStartFor(null)} />}
     </div>
   );
 }

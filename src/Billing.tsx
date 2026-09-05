@@ -4,6 +4,7 @@ import { useStore } from "./store";
 import type { PayMethod, Tx, TxKind } from "./types";
 import { downloadCSV, fmtDate, fmtTime, isToday, METHOD_LABEL, money } from "./utils";
 import { Badge, btnGhost, cardCls, EmptyState, inputCls, Modal, btnPrimary } from "./ui";
+import logoImg from "./assets/logo.jpg";
 
 type Range = "today" | "7d" | "30d" | "all";
 
@@ -39,7 +40,7 @@ export function Billing() {
   const walletLiability = state.members.reduce((s, m) => s + m.wallet, 0);
 
   const exportCSV = () => {
-    downloadCSV("blueshift-transactions.csv", [
+    downloadCSV("GameNation-transactions.csv", [
       ["Date", "Time", "Label", "Detail", "Member", "Type", "Method", "Amount"],
       ...filtered.map((t) => [
         fmtDate(t.at),
@@ -180,8 +181,15 @@ function TxReceipt({ tx, onClose }: { tx: Tx; onClose: () => void }) {
   return (
     <Modal title="Receipt" sub={`${fmtDate(tx.at)} · ${fmtTime(tx.at)}`} onClose={onClose}>
       <div className="space-y-1.5 rounded-lg border border-dashed border-slate-300 p-4 font-mono text-xs text-slate-600 dark:border-ink-600 dark:text-slate-300">
-        <p className="text-center text-sm font-bold tracking-widest text-slate-900 dark:text-white">BLUESHIFT GAMING</p>
-        <p className="text-center text-[10px] text-slate-400">12 Volt Alley · License #GC-2214</p>
+        <div className="flex flex-col items-center justify-center mb-1.5">
+          <img
+            src={logoImg}
+            alt="GameNation Logo"
+            className="h-9 w-9 rounded-full object-cover shadow-sm ring-1 ring-slate-300 dark:ring-ink-600"
+          />
+          <p className="mt-1.5 text-center text-sm font-bold tracking-widest text-slate-900 dark:text-white">GameNation GAMING</p>
+          <p className="text-center text-[10px] text-slate-400">12 Volt Alley · License #GC-2214</p>
+        </div>
         <div className="my-2 border-t border-dashed border-slate-300 dark:border-ink-600" />
         <div className="flex justify-between"><span>Item</span><span className="font-semibold">{tx.label}</span></div>
         {tx.detail && <div className="flex justify-between"><span>Detail</span><span>{tx.detail}</span></div>}
@@ -201,8 +209,15 @@ function TxReceipt({ tx, onClose }: { tx: Tx; onClose: () => void }) {
         <button className={btnPrimary} onClick={onClose}>Close</button>
       </div>
       <div className="print-only">
-        <h1 style={{ textAlign: "center", fontSize: 20, letterSpacing: 4 }}>BLUESHIFT GAMING</h1>
-        <p style={{ textAlign: "center", fontSize: 11 }}>12 Volt Alley · License #GC-2214</p>
+        <div style={{ textAlign: "center", marginBottom: 12 }}>
+          <img
+            src={logoImg}
+            alt="GameNation"
+            style={{ width: 44, height: 44, borderRadius: "50%", margin: "0 auto 6px", display: "block" }}
+          />
+          <h1 style={{ textAlign: "center", fontSize: 20, letterSpacing: 4, margin: 0 }}>GameNation GAMING</h1>
+          <p style={{ textAlign: "center", fontSize: 11, margin: "2px 0 0" }}>12 Volt Alley · License #GC-2214</p>
+        </div>
         <hr style={{ borderStyle: "dashed" }} />
         <p>Item .......... {tx.label}</p>
         {tx.detail && <p>Detail ........ {tx.detail}</p>}
