@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
+  base: "/Gaming-Cafe-Management-System/",
   plugins: [react(), tailwindcss()],
   server: {
     host: "0.0.0.0",
